@@ -3,32 +3,28 @@
 from os import getenv, environ
 import re
 import collections
-import openai
+from openai import OpenAI
+
 from dotenv import load_dotenv
 import json
 import connexion
 import pandas as pd
-from langchain.vectorstores import Neo4jVector
-from langchain.graphs import Neo4jGraph
-from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain_community.vectorstores import Neo4jVector
+from langchain_community.graphs import Neo4jGraph
+
+from langchain_openai import OpenAIEmbeddings
 
 load_dotenv()
-API_KEY = getenv("AZURE_OPENAI_API_KEY")
-RESOURCE_ENDPOINT = getenv("AZURE_OPENAI_API_BASE")
+API_KEY = getenv("OPENAI_API_KEY")
 NEO4J_URL = getenv("NEO4J_URL")
 NEO4J_USERNAME = getenv("NEO4J_USER")
 NEO4J_PASSWORD = getenv("NEO4J_PASSWORD")
 NEO4J_DATABASE = getenv("NEO4J_DATABASE")
 
-environ["OPENAI_API_TYPE"] = "azure"
-environ["OPENAI_API_BASE"] = RESOURCE_ENDPOINT
 environ["OPENAI_API_KEY"] = API_KEY
 environ["OPENAI_API_VERSION"] = "2022-12-01"
 
-openai.api_type = "azure"
-openai.api_base = RESOURCE_ENDPOINT
-openai.api_version = "2023-07-01-preview"
-openai.api_key = API_KEY
+client = OpenAI(api_key=API_KEY)
 
 # CYPER QUERIES
 MERGE_NODE_QUERY = "MERGE ({nodeRef}:{node} {properties})"
@@ -47,8 +43,8 @@ TRAVERSE_QUERY = """
 MATCH (fm:FailureMeasure)<-[:isImprovedByFailureMeasure]-(fc:FailureCause)<-[:isDueToFailureCause]-(fd:FailureMode)-[:occursAtProcessStep]->(ps:ProcessStep)
 WITH fm, fc, fd, ps
 MATCH (fd)-[:resultsInFailureEffect]->(fe:FailureEffect)
-WHERE ID(fd)={id}
-RETURN fm, fc, fe, fd, ps, ID(fm), ID(fc), ID(fe), ID(fd), ID(ps);
+WHERE Id(fd)={id}
+RETURN fm, fc, fe, fd, ps, Id(fm), Id(fc), Id(fe), Id(fd), Id(ps);
 """
 
 # TEMPLATES INFERENCES JOBS
@@ -117,7 +113,7 @@ class Neo4JRepository(Neo4jVector, Neo4jGraph):
             embedding=embedding,
         )
 
-        self.refresh_schema()
+        # self.refresh_schema()
 
 
 class KGRAGService(Neo4JRepository):
@@ -259,8 +255,8 @@ class KGRAGService(Neo4JRepository):
         Returns:
             str: The generated text.
         """
-        return openai.ChatCompletion.create(
-            engine="gpt-4o",
+        return client.chat.completions.create(
+            model="gpt-4o",
             messages=context,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -309,7 +305,7 @@ class KGRAGService(Neo4JRepository):
             result = self.query(
                 """
                     MATCH (fd:FailureMode)
-                    RETURN ID(fd);
+                    RETURN Id(fd);
                     """
             )
             return result
@@ -327,7 +323,7 @@ class KGRAGService(Neo4JRepository):
             result = self.query(
                 """
                     MATCH (fm:FailureMeasure)
-                    RETURN ID(fm);
+                    RETURN Id(fm);
                     """
             )
             return result
@@ -454,7 +450,7 @@ class KGRAGService(Neo4JRepository):
 
         # Add the failure measures to the index
         for entry in failureModeIds:
-            id = entry["ID(fd)"]
+            id = entry["Id(fd)"]
             nodes = self.traverse_graph(str(id))
             chunk, nodeIds = self.create_chunk(nodes)
 
@@ -472,7 +468,7 @@ class KGRAGService(Neo4JRepository):
                     node="FailureMode",
                     properties=self.format_properties({}),
                 ),
-                "WHERE ID(fd)={id}".format(id=id),
+                'WHERE Id(fd)="{id}"'.format(id=id),
                 MERGE_RELATION_QUERY.format(
                     nodeRef1="fd",
                     relation="isIndexed",
@@ -510,19 +506,19 @@ class KGRAGService(Neo4JRepository):
         for node in nodes:
             if node["fm"] not in fm:
                 fm.append(node["fm"])
-                nodeIds["failureMeasureIds"].append(node["ID(fm)"])
+                nodeIds["failureMeasureIds"].append(node["Id(fm)"])
             if node["fc"] not in fc:
                 fc.append(node["fc"])
-                nodeIds["failureCauseIds"].append(node["ID(fc)"])
+                nodeIds["failureCauseIds"].append(node["Id(fc)"])
             if node["fe"] not in fe:
                 fe.append(node["fe"])
-                nodeIds["failureEffectIds"].append(node["ID(fe)"])
+                nodeIds["failureEffectIds"].append(node["Id(fe)"])
             if node["fd"] not in fd:
                 fd.append(node["fd"])
-                nodeIds["failureModeIds"].append(node["ID(fd)"])
+                nodeIds["failureModeIds"].append(node["Id(fd)"])
             if node["ps"] not in ps:
                 ps.append(node["ps"])
-                nodeIds["processStepIds"].append(node["ID(ps)"])
+                nodeIds["processStepIds"].append(node["Id(ps)"])
 
         chunk = (
             ", ".join("ProcessStep: " + i["ProcessStep"] for i in ps)
